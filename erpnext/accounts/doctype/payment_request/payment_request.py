@@ -120,12 +120,17 @@ class PaymentRequest(Document):
 			)
 
 		ref_doc = frappe.get_doc(self.reference_doctype, self.reference_name)
-		if not hasattr(ref_doc, "order_type") or ref_doc.order_type != "Shopping Cart":
-			ref_amount = get_amount(ref_doc, self.payment_account)
+		if hasattr(ref_doc, "order_type") and getattr(ref_doc, "order_type") == "Shopping Cart":
+			return
+
+		existing_payment_request_amount = get_existing_payment_request_amount(
+			ref_doc, self.mode_of_payment
+		)
+
+		if existing_payment_request_amount:
+			ref_amount = get_amount(ref_doc, self.payment_account, self.mode_of_payment)
 			if not ref_amount:
 				frappe.throw(_("Payment Entry is already created"))
-
-			existing_payment_request_amount = flt(get_existing_payment_request_amount(ref_doc))
 
 			if (
 				flt(
@@ -364,6 +369,7 @@ class PaymentRequest(Document):
 			party_amount=party_amount,
 			bank_account=self.payment_account,
 			bank_amount=bank_amount,
+			mode_of_payment=self.mode_of_payment,
 			created_from_payment_request=True,
 		)
 
@@ -550,7 +556,11 @@ def make_payment_request(**args):
 		args.company = ref_doc.company
 	gateway_account = get_gateway_details(args) or frappe._dict()
 
-	grand_total = get_amount(ref_doc, gateway_account.get("payment_account"))
+	grand_total = get_amount(
+		ref_doc,
+		payment_account=gateway_account.get("payment_account"),
+		mode_of_payment=args.mode_of_payment,
+	)
 	if not grand_total:
 		frappe.throw(_("Payment Entry is already created"))
 	if args.loyalty_points and args.dt == "Sales Order":
@@ -564,7 +574,7 @@ def make_payment_request(**args):
 		grand_total = grand_total - loyalty_amount
 
 	# fetches existing payment request `grand_total` amount
-	existing_payment_request_amount = get_existing_payment_request_amount(ref_doc)
+	existing_payment_request_amount = get_existing_payment_request_amount(ref_doc, args.mode_of_payment)
 
 	def validate_and_calculate_grand_total(grand_total, existing_payment_request_amount):
 		grand_total -= existing_payment_request_amount
@@ -576,7 +586,7 @@ def make_payment_request(**args):
 		if args.order_type == "Shopping Cart":
 			# If Payment Request is in an advanced stage, then create for remaining amount.
 			if get_existing_payment_request_amount(
-				ref_doc, ["Initiated", "Partially Paid", "Payment Ordered", "Paid"]
+				ref_doc, args.mode_of_payment, ["Initiated", "Partially Paid", "Payment Ordered", "Paid"]
 			):
 				grand_total = validate_and_calculate_grand_total(grand_total, existing_payment_request_amount)
 			else:
@@ -672,11 +682,12 @@ def make_payment_request(**args):
 	return pr.as_dict()
 
 
-def get_amount(ref_doc, payment_account=None):
+def get_amount(ref_doc, payment_account=None, mode_of_payment=None):
 	"""get amount based on doctype"""
 	grand_total = 0
 
 	dt = ref_doc.doctype
+	grand_total = 0.0
 	if dt in ["Sales Order", "Purchase Order"]:
 		advance_amount = flt(ref_doc.advance_paid)
 		if ref_doc.party_account_currency != ref_doc.currency:
@@ -709,10 +720,17 @@ def get_amount(ref_doc, payment_account=None):
 			else:
 				grand_total = flt(flt(ref_doc.outstanding_amount) / ref_doc.conversion_rate)
 	elif dt == "POS Invoice":
-		for pay in ref_doc.payments:
-			if pay.type == "Phone" and pay.account == payment_account:
-				grand_total = pay.amount
-				break
+		if mode_of_payment:
+			for pay in ref_doc.payments:
+				if pay.mode_of_payment == mode_of_payment:
+					grand_total = pay.amount
+					break
+		if payment_account and not grand_total:
+			for pay in ref_doc.payments:
+				if pay.account == payment_account:
+					grand_total = pay.amount
+					break
+
 	elif dt == "Fees":
 		grand_total = ref_doc.outstanding_amount
 
@@ -759,7 +777,7 @@ def cancel_old_payment_requests(ref_dt, ref_dn):
 						frappe.db.set_value("Integration Request", ireq.name, "status", "Cancelled")
 
 
-def get_existing_payment_request_amount(ref_doc, statuses: list | None = None) -> list:
+def get_existing_payment_request_amount(ref_doc, mode_of_payment=None, statuses: list | None = None) -> list:
 	"""
 	Return the total amount of Payment Requests against a reference document.
 	"""
@@ -773,12 +791,15 @@ def get_existing_payment_request_amount(ref_doc, statuses: list | None = None) -
 		.where(PR.docstatus == 1)
 	)
 
+	if mode_of_payment:
+		query = query.where(PR.mode_of_payment == mode_of_payment)
+
 	if statuses:
 		query = query.where(PR.status.isin(statuses))
 
 	response = query.run()
 
-	os_amount_in_transaction_currency = flt(response[0][0] if response[0] else 0)
+	os_amount_in_transaction_currency = flt(response[0][0] if response[0] else 0.0)
 
 	if ref_doc.currency != ref_doc.party_account_currency:
 		os_amount_in_transaction_currency = flt(os_amount_in_transaction_currency / ref_doc.conversion_rate)
@@ -846,6 +867,7 @@ def update_payment_requests_as_per_pe_references(references=None, cancel=False):
 			"grand_total",
 			"outstanding_amount",
 			"payment_request_type",
+			"mode_of_payment",
 		],
 	)
 
