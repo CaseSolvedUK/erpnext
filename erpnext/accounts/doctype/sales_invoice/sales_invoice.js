@@ -186,6 +186,10 @@ erpnext.accounts.SalesInvoiceController = class SalesInvoiceController extends (
 			this.frm.cscript.sales_order_btn();
 			this.frm.cscript.delivery_note_btn();
 			this.frm.cscript.quotation_btn();
+			this.frm.cscript.journal_entry_btn();
+			this.frm.cscript.payment_entry_btn();
+			this.frm.cscript.purchase_order_btn();
+			this.frm.cscript.purchase_invoice_btn();
 		}
 
 		this.set_default_print_format();
@@ -280,6 +284,111 @@ erpnext.accounts.SalesInvoiceController = class SalesInvoiceController extends (
 			},
 			__("Get Items From")
 		);
+	}
+
+	journal_entry_btn() {
+		var me = this;
+		this.$journal_entry_btn = this.frm.add_custom_button(__('Journal Entry'),
+			function() {
+				erpnext.utils.map_preserve_items({
+					method: "erpnext.accounts.doctype.journal_entry.journal_entry.make_sales_invoice",
+					source_doctype: "Journal Entry",
+					target: me.frm,
+					date_field: "posting_date",
+					setters: {
+						posting_date: null,
+						total_debit: null,
+						remark: null,
+						voucher_type: null,
+					},
+					allow_child_item_selection: 1,
+					child_fieldname: "accounts",
+					child_columns: ["account", "debit_in_account_currency"],
+					size: "extra-large",
+					get_query_filters: {
+						docstatus: 1,
+						company: me.frm.doc.company,
+					},
+				});
+			}, __("Get Items From"));
+	}
+
+	payment_entry_btn() {
+		var me = this;
+		this.$payment_entry_btn = this.frm.add_custom_button(__('Payment Entry'),
+			function() {
+				erpnext.utils.map_preserve_items({
+					method: "erpnext.accounts.doctype.payment_entry.payment_entry.make_sales_invoice",
+					source_doctype: "Payment Entry",
+					target: me.frm,
+					date_field: "posting_date",
+					setters: {
+						posting_date: null,
+						paid_amount: null,
+						remarks: null,
+					},
+					size: "extra-large",
+					get_query_filters: {
+						docstatus: 1,
+						company: me.frm.doc.company,
+						payment_type: "Pay",
+					},
+				});
+			}, __("Get Items From"));
+	}
+
+	purchase_order_btn() {
+		var me = this;
+		this.$purchase_order_btn = this.frm.add_custom_button(__('Purchase Order'),
+			function() {
+				erpnext.utils.map_preserve_items({
+					method: "erpnext.buying.doctype.purchase_order.purchase_order.make_sales_invoice",
+					source_doctype: "Purchase Order",
+					target: me.frm,
+					date_field: "posting_date",
+					setters: {
+						transaction_date: null,
+						grand_total: null,
+						supplier: null,
+						status: null,
+					},
+					allow_child_item_selection: 1,
+					child_fieldname: "items",
+					child_columns: ["item_name", "qty", "rate", "amount"],
+					size: "extra-large",
+					get_query_filters: {
+						docstatus: 1,
+						company: me.frm.doc.company,
+					},
+				});
+			}, __("Get Items From"));
+	}
+
+	purchase_invoice_btn() {
+		var me = this;
+		this.$purchase_invoice_btn = this.frm.add_custom_button(__('Purchase Invoice'),
+			function() {
+				erpnext.utils.map_preserve_items({
+					method: "erpnext.accounts.doctype.purchase_invoice.purchase_invoice.make_sales_invoice",
+					source_doctype: "Purchase Invoice",
+					target: me.frm,
+					date_field: "posting_date",
+					setters: {
+						posting_date: null,
+						grand_total: null,
+						supplier: null,
+						status: null,
+					},
+					allow_child_item_selection: 1,
+					child_fieldname: "items",
+					child_columns: ["item_name", "qty", "rate", "amount"],
+					size: "extra-large",
+					get_query_filters: {
+						docstatus: 1,
+						company: me.frm.doc.company,
+					},
+				});
+			}, __("Get Items From"));
 	}
 
 	quotation_btn() {
@@ -578,6 +687,23 @@ erpnext.accounts.SalesInvoiceController = class SalesInvoiceController extends (
 		this.calculate_taxes_and_totals();
 	}
 };
+
+// used instead of erpnext.utils.map_current_doc
+erpnext.utils.map_preserve_items = function(opts) {
+	if (opts.target.doc.items.length) {
+		erpnext.utils.preserved_items = opts.target.doc.items;
+		opts.target.doc.items = [];
+	}
+	erpnext.utils.map_current_doc(opts);
+}
+
+// called in refresh which is triggered at the end of mapping
+erpnext.utils.map_restore_items = function(frm) {
+	if (erpnext.utils?.preserved_items?.length) {
+		frm.doc.items = erpnext.utils.preserved_items.concat(frm.doc.items);
+	}
+	erpnext.utils.preserved_items = [];
+}
 
 // for backward compatibility: combine new and previous states
 extend_cscript(cur_frm.cscript, new erpnext.accounts.SalesInvoiceController({ frm: cur_frm }));
@@ -1025,6 +1151,7 @@ frappe.ui.form.on("Sales Invoice", {
 	},
 
 	refresh: function (frm) {
+		erpnext.utils.map_restore_items(frm);
 		if (frm.doc.docstatus === 0 && !frm.doc.is_return) {
 			frm.add_custom_button(__("Fetch Timesheet"), function () {
 				let d = new frappe.ui.Dialog({
