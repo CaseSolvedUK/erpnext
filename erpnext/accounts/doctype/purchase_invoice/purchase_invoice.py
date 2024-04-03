@@ -1785,3 +1785,61 @@ def make_purchase_receipt(source_name, target_doc=None):
 	)
 
 	return doc
+
+
+@frappe.whitelist()
+def make_sales_invoice(source_name, target_doc=None, args=None):
+	# NOTE: Sales Invoice has JS code to preserve any existing items before and after this call
+	# don't map parent fields
+	# map items as-is except rate -> price_list_rate
+
+	def post_process(pi, si):
+		if pi.currency != si.currency:
+			frappe.throw(_("{0} {1} currency doesn't match {2} {3}").format(
+				pi.doctype, pi.name, si.doctype, si.name))
+		si.run_method("set_missing_values")
+		si.run_method("calculate_taxes_and_totals")
+
+	def update_item(pi_item, si_item, pi):
+		si_item.income_account = frappe.db.get_value("Company", pi.company, "default_income_account")
+
+	si = get_mapped_doc(
+		"Purchase Invoice",
+		source_name,
+		{
+			"Purchase Invoice": {
+				"doctype": "Sales Invoice",
+				"validation": {"docstatus": ["=", 1]},
+				"field_no_map": [
+					"posting_date",
+					"due_date",
+					"naming_series",
+					"currency",
+					"taxes_and_charges",
+					"tax_category",
+					"shipping_rule",
+					"incoterm",
+					"additional_discount_percentage",
+					"discount_amount",
+					"payment_terms_template",
+					"tc_name",
+					"status",
+					"letter_head",
+					"select_print_heading",
+					"language",
+				],
+			},
+			"Purchase Invoice Item": {
+				"doctype": "Sales Invoice Item",
+				"field_no_map": ["price_list_rate", "rate", "item_tax_template"],
+				"field_map": {
+					"rate": "price_list_rate",
+				},
+				"postprocess": update_item,
+			},
+		},
+		target_doc,
+		post_process,
+	)
+
+	return si

@@ -2540,3 +2540,51 @@ def make_payment_order(source_name, target_doc=None):
 	)
 
 	return doclist
+
+
+@frappe.whitelist()
+def make_sales_invoice(source_name, target_doc=None, args=None):
+	from frappe.model.mapper import get_mapped_doc
+	# NOTE: Sales Invoice has JS code to preserve any existing items before and after this call
+	# map the JE expense account name as the item name
+	# and the JE remark as item description
+	# and the debit amount (only) as price list rate so margin and discount can be applied
+
+	def post_process(pe, si):
+		for item in si.items[:]:
+			if not item.price_list_rate:
+				si.items.remove(item)
+		if pe.paid_from_account_currency != si.currency:
+			frappe.throw(_("{0} {1} currency doesn't match {2} {3}").format(
+				pe.doctype, pe.name, si.doctype, si.name))
+		si.run_method("set_missing_values")
+		si.run_method("calculate_taxes_and_totals")
+
+	def update_item(pe_ref, si_item, pe):
+		si_item.qty = 1
+		si_item.income_account = frappe.db.get_value("Company", pe.company, "default_income_account")
+
+	si = get_mapped_doc(
+		"Payment Entry",
+		source_name,
+		{
+			"Payment Entry": {
+				"doctype": "Sales Invoice",
+				"validation": {"docstatus": ["=", 1], "payment_type": "Pay"},
+				"field_no_map": ["posting_date", "status", "letter_head", "remarks"],
+			},
+			"Payment Entry Reference": {
+				"doctype": "Sales Invoice Item",
+				"field_map": {
+					"reference_doctype": "item_name",
+					"reference_name": "description",
+					"total_amount": "price_list_rate",
+				},
+				"postprocess": update_item,
+			},
+		},
+		target_doc,
+		post_process,
+	)
+
+	return si
