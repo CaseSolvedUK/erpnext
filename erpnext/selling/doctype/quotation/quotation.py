@@ -504,49 +504,55 @@ def _make_sales_invoice(source_name, target_doc=None, ignore_permissions=False):
 
 def _make_customer(source_name, ignore_permissions=False, customer_group=None):
 	quotation = frappe.db.get_value(
-		"Quotation", source_name, ["order_type", "party_name", "customer_name"], as_dict=1
+		"Quotation", source_name, ["order_type", "party_name", "customer_name", "quotation_to"], as_dict=1
 	)
 
-	if quotation and quotation.get("party_name"):
-		if not frappe.db.exists("Customer", quotation.get("party_name")):
-			lead_name = quotation.get("party_name")
-			customer_name = frappe.db.get_value(
-				"Customer", {"lead_name": lead_name}, ["name", "customer_name"], as_dict=True
-			)
-			if not customer_name:
-				from erpnext.crm.doctype.lead.lead import _make_customer
+	party_name = quotation.get("party_name")
+	if quotation and party_name:
+		if frappe.db.exists("Customer", party_name):
+			return frappe.get_doc("Customer", party_name)
 
-				customer_doclist = _make_customer(lead_name, ignore_permissions=ignore_permissions)
-				customer = frappe.get_doc(customer_doclist)
-				customer.flags.ignore_permissions = ignore_permissions
-				customer.customer_group = customer_group
-
-				try:
-					customer.insert()
-					return customer
-				except frappe.NameError:
-					if frappe.defaults.get_global_default("cust_master_name") == "Customer Name":
-						customer.run_method("autoname")
-						customer.name += "-" + lead_name
-						customer.insert()
-						return customer
-					else:
-						raise
-				except frappe.MandatoryError as e:
-					mandatory_fields = e.args[0].split(":")[1].split(",")
-					mandatory_fields = [customer.meta.get_label(field.strip()) for field in mandatory_fields]
-
-					frappe.local.message_log = []
-					lead_link = frappe.utils.get_link_to_form("Lead", lead_name)
-					message = (
-						_("Could not auto create Customer due to the following missing mandatory field(s):")
-						+ "<br>"
-					)
-					message += "<br><ul><li>" + "</li><li>".join(mandatory_fields) + "</li></ul>"
-					message += _("Please create Customer from Lead {0}.").format(lead_link)
-
-					frappe.throw(message, title=_("Mandatory Missing"))
-			else:
-				return customer_name
+		party_doc = frappe.get_doc(quotation.quotation_to, party_name)
+		if party_doc.doctype == "Customer":
+			return party_doc
+		elif party_doc.doctype == "Lead":
+			try:
+				return frappe.get_last_doc("Customer", {"lead_name": party_doc.name})
+			except frappe.DoesNotExistError:
+				pass
+			from erpnext.crm.doctype.lead.lead import _make_customer as make_customer_from_lead
+			customer = make_customer_from_lead(party_doc.name, ignore_permissions=ignore_permissions)
+		elif party_doc.doctype == "Prospect":
+			from erpnext.crm.doctype.prospect.prospect import make_customer as make_customer_from_prospect
+			customer = make_customer_from_prospect(party_doc.name)
 		else:
-			return frappe.get_doc("Customer", quotation.get("party_name"))
+			frappe.throw("Unknown Quotation To value")
+
+		customer = frappe.get_doc(customer)
+		customer.flags.ignore_permissions = ignore_permissions
+		customer.customer_group = customer_group
+
+		try:
+			customer.insert()
+			return customer
+		except frappe.NameError:
+			if frappe.defaults.get_global_default("cust_master_name") == "Customer Name":
+				customer.run_method("autoname")
+				customer.name += "-" + lead_name
+				customer.insert()
+				return customer
+			else:
+				raise
+		except frappe.MandatoryError as e:
+			mandatory_fields = e.args[0].split(":")[1].split(",")
+			mandatory_fields = [customer.meta.get_label(field.strip()) for field in mandatory_fields]
+
+			frappe.local.message_log = []
+			link = frappe.utils.get_link_to_form(party_doc.doctype, party_doc.name)
+			message = (
+				_("Could not auto create Customer due to the following missing mandatory field(s):")
+				+ "<br>"
+			)
+			message += "<br><ul><li>" + "</li><li>".join(mandatory_fields) + "</li></ul>"
+			message += _("Please create Customer from {0} {1}.").format(party_doc.doctype, link)
+			frappe.throw(message, title=_("Mandatory Missing"))
