@@ -147,23 +147,22 @@
 		<thead>
 			<tr>
 				{% if(report.report_name == "Accounts Receivable" or report.report_name == "Accounts Payable") %}
-					<th style="width: 10%">{{ _("Date") }}</th>
+					<th style="width: 14%">{{ _("Date") }}</th>
+					<th style="width: 14%">{{ _("Due Date") }}</th>
 					<th style="width: 4%">{{ _("Age (Days)") }}</th>
 
 					{% if(report.report_name == "Accounts Receivable" and filters.show_sales_person) %}
-						<th style="width: 14%">{{ _("Reference") }}</th>
+						<th style="width: 10%">{{ _("Reference") }}</th>
 						<th style="width: 10%">{{ _("Sales Person") }}</th>
 					{% else %}
-						<th style="width: 24%">{{ _("Reference") }}</th>
+						<th style="width: 20%">{{ _("Reference") }}</th>
 					{% endif %}
 					{% if not(filters.show_future_payments) %}
-						<th style="width: 20%">
 						{% if (filters.customer or filters.supplier or filters.customer_name) %}
-							{{ _("Remarks") }}
+							{% if filters.show_remarks %}<th style="width: 20%">{{ _("Remarks") }}</th>{% endif %}
 						{% else %}
-							{{ _("Party") }}
+							<th style="width: 20%">{{ _("Party") }}</th>
 						{% endif %}
-						</th>
 					{% endif %}
 					<th style="width: 10%; text-align: right">{{ _("Invoiced Amount") }}</th>
 					{% if not(filters.show_future_payments) %}
@@ -186,13 +185,11 @@
 						<th style="width: 10%">{{ _("Remaining Balance") }}</th>
 					{% endif %}
 				{% else %}
-					<th style="width: 40%">
-						{% if (filters.customer or filters.supplier or filters.customer_name) %}
-							{{ _("Remarks")}}
-						{% else %}
-							{{ _("Party") }}
-						{% endif %}
-					</th>
+					{% if (filters.customer or filters.supplier or filters.customer_name) %}
+						{% if filters.show_remarks %}<th style="width: 40%">{{ _("Remarks") }}</th>{% endif %}
+					{% else %}
+						<th style="width: 40%">{{ _("Party") }}</th>
+					{% endif %}
 					<th style="width: 15%">{{ _("Total Invoiced Amount") }}</th>
 					<th style="width: 15%">{{ _("Total Paid Amount") }}</th>
 					<th style="width: 15%">
@@ -212,6 +209,7 @@
 				{% if(report.report_name == "Accounts Receivable" or report.report_name == "Accounts Payable") %}
 					{% if(data[i]["party"]) %}
 						<td>{{ (data[i]["posting_date"]) }}</td>
+						<td>{{ (data[i]["due_date"]) }}</td>
 						<td style="text-align: right">{{ data[i]["age"] }}</td>
 						<td>
 							{% if not(filters.show_future_payments) %}
@@ -226,22 +224,25 @@
 						{% endif %}
 
 						{% if not (filters.show_future_payments) %}
-						<td>
-							{% if(not(filters.customer or filters.supplier or filters.customer_name)) %}
+							{% if (filters.customer or filters.supplier or filters.customer_name) %}
+								{% if filters.show_remarks %}
+								<td><div>
+								{% if data[i]["remarks"] %}
+									{{ _("Remarks") }}:
+									{{ data[i]["remarks"] }}
+								{% endif %}
+								</div></td>
+								{% endif %}
+							{% else %}
+								<td>
 								{{ data[i]["party"] }}
 								{% if(data[i]["customer_name"] and data[i]["customer_name"] != data[i]["party"]) %}
 									<br> {{ data[i]["customer_name"] }}
 								{% elif(data[i]["supplier_name"] != data[i]["party"]) %}
 									<br> {{ data[i]["supplier_name"] }}
 								{% endif %}
+								</td>
 							{% endif %}
-							<div>
-							{% if data[i]["remarks"] %}
-								{{ _("Remarks") }}:
-								{{ data[i]["remarks"] }}
-							{% endif %}
-							</div>
-						</td>
 						{% endif %}
 
 						<td style="text-align: right">
@@ -267,8 +268,13 @@
 						{% endif %}
 					{% else %}
 						<td></td>
-						{% if not(filters.show_future_payments) %}
 						<td></td>
+						{% if not(filters.show_future_payments) %}
+							{% if (filters.customer or filters.supplier or filters.customer_name) %}
+								{% if filters.show_remarks %}<td></td>{% endif %}
+							{% else %}
+								<td></td>
+							{% endif %}
 						{% endif %}
 						{% if(report.report_name == "Accounts Receivable" and filters.show_sales_person) %}
 						<td></td>
@@ -299,18 +305,25 @@
 				{% else %}
 					{% if(data[i]["party"] or "&nbsp;") %}
 						{% if not(data[i]["is_total_row"]) %}
-							<td>
-								{% if(not(filters.customer | filters.supplier)) %}
-									{{ data[i]["party"] }}
-									{% if(data[i]["customer_name"] and data[i]["customer_name"] != data[i]["party"]) %}
-										<br> {{ data[i]["customer_name"] }}
-									{% elif(data[i]["supplier_name"] != data[i]["party"]) %}
-										<br> {{ data[i]["supplier_name"] }}
-									{% endif %}
+							{% if (filters.customer or filters.supplier or filters.customer_name) %}
+								{% if filters.show_remarks %}
+								<td><div>
+								{% if data[i]["remarks"] %}
+									{{ _("Remarks") }}:
+									{{ data[i]["remarks"] }}
 								{% endif %}
-								<br>{{ _("Remarks") }}:
-								{{ data[i]["remarks"] }}
-							</td>
+								</div></td>
+								{% endif %}
+							{% else %}
+								<td>
+								{{ data[i]["party"] }}
+								{% if(data[i]["customer_name"] and data[i]["customer_name"] != data[i]["party"]) %}
+									<br> {{ data[i]["customer_name"] }}
+								{% elif(data[i]["supplier_name"] != data[i]["party"]) %}
+									<br> {{ data[i]["supplier_name"] }}
+								{% endif %}
+								</td>
+							{% endif %}
 						{% else %}
 							<td><b>{{ _("Total") }}</b></td>
 						{% endif %}
@@ -322,8 +335,10 @@
 				{% endif %}
 				</tr>
 			{% endfor %}
+
 			<td></td>
 			<td></td>
+			{% if not (filters.customer or filters.supplier or filters.customer_name) or filters.show_remarks %}<td></td>{% endif %}
 			<td></td>
 			<td></td>
 			<td style="text-align: right"><b>{{ frappe.utils.fmt_money(data|sum(attribute="invoiced"), currency=data[0]["currency"]) }}</b></td>
@@ -340,11 +355,11 @@
 	<table class="table table-bordered">
 		<thead>
 			<tr>
-				<th style="width: 25%">0 - 30 Days</th>
-				<th style="width: 25%">30 - 60 Days</th>
-				<th style="width: 25%">60 - 90 Days</th>
-				<th style="width: 25%">90 - 120 Days</th>
-				<th style="width: 20%">Above 120 Days</th>
+				<th style="width: 20%">0 - 30 Days</th>
+				<th style="width: 20%">31 - 60 Days</th>
+				<th style="width: 20%">61 - 90 Days</th>
+				<th style="width: 20%">91 - 120 Days</th>
+				<th style="width: 20%">120+ Days</th>
 			</tr>
 		</thead>
 		<tbody>
