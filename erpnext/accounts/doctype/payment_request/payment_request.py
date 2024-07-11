@@ -561,11 +561,16 @@ def get_amount(ref_doc, payment_account=None, mode_of_payment=None):
 		frappe.throw(_("Payment Entry is already created"))
 
 
-def get_existing_payment_request_amount(ref_dt, ref_dn, mode_of_payment):
+def get_existing_payment_request_amount(ref_dt, ref_dn, mode_of_payment=None):
 	"""
 	Get the existing payment request which are unpaid or partially paid for payment channel other than Phone
 	and get the summation of existing paid payment request for Phone payment channel.
+	Optionally only look at a particular mode of payment.
 	"""
+	if mode_of_payment:
+		mop_condition = f"and mode_of_payment = {mode_of_payment}"
+	else:
+		mop_condition = ""
 	existing_payment_request_amount = frappe.db.sql(
 		"""
 		select sum(grand_total)
@@ -573,15 +578,15 @@ def get_existing_payment_request_amount(ref_dt, ref_dn, mode_of_payment):
 		where
 			reference_doctype = %s
 			and reference_name = %s
-			and mode_of_payment = %s
+			%s
 			and docstatus = 1
 			and (status != 'Paid'
 			or (payment_channel = 'Phone'
 				and status = 'Paid'))
 	""",
-		(ref_dt, ref_dn, mode_of_payment),
+		(ref_dt, ref_dn, mop_condition),
 	)
-	return flt(existing_payment_request_amount[0][0]) if existing_payment_request_amount else 0
+	return flt(existing_payment_request_amount[0][0]) if existing_payment_request_amount else 0.0
 
 
 def get_gateway_details(args):  # nosemgrep
