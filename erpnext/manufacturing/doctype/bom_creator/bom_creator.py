@@ -68,31 +68,11 @@ class BOMCreator(Document):
 	# end: auto-generated types
 
 	def before_save(self):
-		self.set_status()
 		self.set_is_expandable()
-		self.set_conversion_factor()
 		self.set_reference_id()
+		self.set_status()
+		self.set_conversion_factor()
 		self.set_rate_for_items()
-
-	def validate(self):
-		self.validate_items()
-
-	def validate_items(self):
-		for row in self.items:
-			if row.is_expandable and row.item_code == self.item_code:
-				frappe.throw(_("Item {0} cannot be added as a sub-assembly of itself").format(row.item_code))
-
-			if not row.parent_row_no and row.fg_item and row.fg_item != self.item_code:
-				frappe.throw(
-					_("At row {0}: set Parent Row No for item {1}").format(row.idx, row.item_code),
-					title=_("Set Parent Row No in Items Table"),
-				)
-
-			elif row.parent_row_no and row.fg_item == self.item_code:
-				frappe.throw(
-					_("At row {0}: Parent Row No cannot be set for item {1}").format(row.idx, row.item_code),
-					title=_("Remove Parent Row No in Items Table"),
-				)
 
 	def set_status(self, save=False):
 		self.status = {
@@ -132,23 +112,70 @@ class BOMCreator(Document):
 		self.validate_fields()
 		self.set_status()
 
+	def set_item_names(self):
+		# needed because a new/duplicate document will not have item names
+		# and there is no suitable hook
+		from frappe.model.naming import set_new_name
+		for idx, row in enumerate(self.items, start=1):
+			if not row.name:
+				set_new_name(row)
+			row.idx = idx  # default table order is `idx asc`
+
 	def set_reference_id(self):
-		parent_reference = {row.idx: row.name for row in self.items}
+		"Sets parent row references and ensures they are valid"
+		self.set_item_names()
+		parent_rows = {row.idx: row for row in self.items}
+		errors = []
 
 		for row in self.items:
-			ref_id = ""
+			candidate_names = [r.name for r in self.items if r.item_code == row.fg_item]
+			if row.fg_reference_id not in candidate_names:
+				row.fg_reference_id = None
+			if len(candidate_names) == 1:  # self-heal if only one option for the parent assembly
+				row.fg_reference_id = candidate_names[0]
 
-			if row.parent_row_no:
-				ref_id = parent_reference.get(cint(row.parent_row_no))
-
-			# Check whether the reference id of the FG Item has correct or not
-			if row.fg_reference_id and row.fg_reference_id == ref_id:
+			if row.is_expandable and row.item_code == self.item_code:
+				errors.append(
+					_("Item {0} cannot be added as a sub-assembly of itself").format(row.item_code)
+				)
 				continue
 
-			if row.parent_row_no:
-				row.fg_reference_id = ref_id
+			elif not row.fg_reference_id and not row.parent_row_no and row.fg_item and row.fg_item != self.item_code:
+				errors.append(
+					_("At row {0}: set Parent Row No for item {1}").format(row.idx, row.item_code)
+				)
+				continue
+
 			elif row.fg_item == self.item_code:
+				row.parent_row_no = None
 				row.fg_reference_id = self.name
+				continue
+
+			if row.fg_reference_id:  # only used when more than one candidate parent assembly
+				for idx, parent_row in ((r.idx, r) for r in self.items):
+					if parent_row.name == row.fg_reference_id:
+						if parent_row.item_code == row.fg_item:
+							row.parent_row_no = idx
+						elif not row.parent_row_no:
+							continue  # ensures the else will be triggered
+						break
+				else:
+					errors.append(
+						_("At row {0}: Referenced parent row does not match the parent item code {1}").format(row.idx, row.fg_item)
+					)
+
+			if row.parent_row_no:
+				parent_row = parent_rows.get(cint(row.parent_row_no))
+				if parent_row.item_code == row.fg_item:
+					row.fg_reference_id = parent_row.name
+				else:
+					errors.append(
+						_("At row {0}: Parent Row No item code does not match the parent item code {1}").format(row.idx, row.fg_item)
+					)
+
+		if errors:
+			frappe.throw("\n".join(errors))
+
 
 	@frappe.whitelist()
 	def add_boms(self):
