@@ -47,8 +47,6 @@ class InvalidPaymentEntry(ValidationError):
 class PaymentEntry(AccountsController):
 	def __init__(self, *args, **kwargs):
 		super().__init__(*args, **kwargs)
-		if not self.is_new():
-			self.setup_party_account_field()
 
 	def setup_party_account_field(self):
 		self.party_account_field = None
